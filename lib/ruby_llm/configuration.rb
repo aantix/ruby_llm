@@ -33,6 +33,7 @@ module RubyLLM
                   :gpustack_api_base,
                   :gpustack_api_key,
                   :mistral_api_key,
+                  :claude_code_cli_path,
                   # Default models
                   :default_model,
                   :default_embedding_model,
@@ -80,6 +81,8 @@ module RubyLLM
       @log_level = ENV['RUBYLLM_DEBUG'] ? Logger::DEBUG : Logger::INFO
       @log_stream_debug = ENV['RUBYLLM_STREAM_DEBUG'] == 'true'
       self.log_regexp_timeout = Regexp.respond_to?(:timeout) ? (Regexp.timeout || 1.0) : nil
+
+      @claude_code_cli_path = 'claude' # defaults to 'claude' in PATH
     end
 
     def instance_variables

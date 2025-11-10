@@ -41,6 +41,8 @@ module RubyLLM
         end
 
         def configuration_requirements
+          # No API key required - uses local CLI
+          # Optional: config.claude_code_cli_path can be set if 'claude' is not in PATH
           []
         end
 
@@ -115,11 +117,12 @@ module RubyLLM
       def build_cli_command(prompt, stream:)
         # Escape the prompt for shell
         escaped_prompt = prompt.gsub("'", "'\\''")
+        cli_path = @config.claude_code_cli_path || 'claude'
 
         if stream
-          "claude -p --output-format stream-json '#{escaped_prompt}'"
+          "#{cli_path} -p --output-format stream-json '#{escaped_prompt}'"
         else
-          "claude -p '#{escaped_prompt}'"
+          "#{cli_path} -p '#{escaped_prompt}'"
         end
       end
 
