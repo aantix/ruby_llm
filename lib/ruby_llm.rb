@@ -96,6 +96,7 @@ end
 RubyLLM::Provider.register :anthropic, RubyLLM::Providers::Anthropic
 RubyLLM::Provider.register :azure, RubyLLM::Providers::Azure
 RubyLLM::Provider.register :bedrock, RubyLLM::Providers::Bedrock
+RubyLLM::Provider.register :claude_code, RubyLLM::Providers::ClaudeCode
 RubyLLM::Provider.register :deepseek, RubyLLM::Providers::DeepSeek
 RubyLLM::Provider.register :gemini, RubyLLM::Providers::Gemini
 RubyLLM::Provider.register :gpustack, RubyLLM::Providers::GPUStack
