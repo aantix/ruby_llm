@@ -54,40 +54,80 @@ module RubyLLM
       private
 
       def sync_with_cli(messages, tools:, temperature:, model:)
+        puts "**** messages = #{messages.inspect}"
+
         prompt = build_prompt(messages, tools:, temperature:, model:)
         output, status = execute_claude_cli(prompt, stream: false)
 
-        raise Error, "Claude CLI failed: #{output}" unless status.success?
+        raise Error.new(nil, "Claude CLI failed: #{output}") unless status.success?
 
         parse_cli_response(output)
+      ensure
+        cleanup_temp_files
       end
 
       def stream_with_cli(messages, tools:, temperature:, model:, &block)
         prompt = build_prompt(messages, tools:, temperature:, model:)
         execute_claude_cli_streaming(prompt, &block)
+      ensure
+        cleanup_temp_files
       end
 
       def build_prompt(messages, tools:, temperature:, model:)
         # Convert messages to a prompt string
+        # Extract attachments separately for CLI --attachment flags
+        @message_attachments = []
+
         prompt_parts = messages.map do |msg|
+          content_text = extract_content_and_attachments(msg)
+
           case msg.role
           when :system
-            "System: #{msg.content}"
+            "System: #{content_text}"
           when :user
-            "User: #{msg.content}"
+            "User: #{content_text}"
           when :assistant
-            "Assistant: #{msg.content}"
+            "Assistant: #{content_text}"
           else
-            "#{msg.role}: #{msg.content}"
+            "#{msg.role}: #{content_text}"
           end
         end
 
         prompt_parts.join("\n\n")
       end
 
+      # Extract text content and collect attachments from a message
+      def extract_content_and_attachments(msg)
+        content = msg.content
+
+        # Handle Content objects with attachments
+        if content.is_a?(RubyLLM::Content)
+          # Collect attachments for CLI --attachment flags
+          content.attachments.each do |attachment|
+            @message_attachments << attachment
+          end
+
+          # Return just the text portion
+          content.text || ''
+        else
+          # Plain string content
+          content.to_s
+        end
+      end
+
       def execute_claude_cli(prompt, stream: false)
         cmd = build_cli_command(prompt, stream:)
-        stdout, stderr, status = Open3.capture3(cmd)
+        Rails.logger.debug("Executing Claude CLI command: #{cmd}")
+
+        # Execute from working directory if configured
+        options = {}
+        options[:chdir] = @config.working_directory if @config.working_directory
+
+        stdout, stderr, status = Open3.capture3(cmd, options)
+
+        Rails.logger.debug("Claude CLI stdout: #{stdout}")
+        Rails.logger.debug("Claude CLI stderr: #{stderr}")
+        Rails.logger.debug("Claude CLI status: #{status.exitstatus}")
 
         output = stream ? stdout : stdout
         [output, status]
@@ -96,7 +136,11 @@ module RubyLLM
       def execute_claude_cli_streaming(prompt, &block)
         cmd = build_cli_command(prompt, stream: true)
 
-        Open3.popen2e(cmd) do |_stdin, stdout_stderr, wait_thr|
+        # Execute from working directory if configured
+        options = {}
+        options[:chdir] = @config.working_directory if @config.working_directory
+
+        Open3.popen2e(cmd, options) do |_stdin, stdout_stderr, wait_thr|
           stdout_stderr.each_line do |line|
             next if line.strip.empty?
 
@@ -110,20 +154,90 @@ module RubyLLM
           end
 
           status = wait_thr.value
-          raise Error, "Claude CLI failed with status #{status.exitstatus}" unless status.success?
+          raise Error.new(nil, "Claude CLI failed with status #{status.exitstatus}") unless status.success?
         end
       end
 
       def build_cli_command(prompt, stream:)
-        # Escape the prompt for shell
-        escaped_prompt = prompt.gsub("'", "'\\''")
+        # Escape the prompt for shell - single quotes need to be handled specially
+        # We end the string, add an escaped quote, and start a new string: 'text'\''more'
+        escaped_prompt = prompt.gsub("'", "'\\\\''")
         cli_path = @config.claude_code_cli_path || 'claude'
 
-        if stream
-          "#{cli_path} -p --output-format stream-json '#{escaped_prompt}'"
-        else
-          "#{cli_path} -p '#{escaped_prompt}'"
+        # Build base command
+        cmd_parts = [cli_path]
+
+        # Add attachment flags if we have any
+        if @message_attachments && @message_attachments.any?
+          @message_attachments.each do |attachment|
+            attachment_path = get_attachment_path(attachment)
+            if attachment_path
+              # Escape the path for shell
+              escaped_path = attachment_path.to_s.gsub("'", "'\\\\''")
+              cmd_parts << "--attachment '#{escaped_path}'"
+            end
+          end
         end
+
+        # Add output format for streaming
+        cmd_parts << "--output-format stream-json" if stream
+
+        # Add the prompt last
+        cmd_parts << "'#{escaped_prompt}'"
+
+        puts "**** " + cmd_parts.join(" ")
+        cmd_parts.join(' ')
+      end
+
+      # Get the file path for an attachment
+      # Returns the path if it's a file path, otherwise creates a temporary file
+      def get_attachment_path(attachment)
+        if attachment.path?
+          # Already a file path, use it directly
+          attachment.source
+        elsif attachment.active_storage?
+          # For ActiveStorage, we need to create a temporary file
+          create_temp_file_for_attachment(attachment)
+        elsif attachment.url?
+          # URLs are not supported for CLI attachments
+          RubyLLM.logger.warn "URL attachments are not supported for Claude CLI: #{attachment.source}"
+          nil
+        elsif attachment.io_like?
+          # Create a temporary file from IO content
+          create_temp_file_for_attachment(attachment)
+        else
+          RubyLLM.logger.warn "Unsupported attachment type: #{attachment.source.class}"
+          nil
+        end
+      end
+
+      # Create a temporary file for an attachment
+      def create_temp_file_for_attachment(attachment)
+        require 'tempfile'
+
+        # Track temporary files for cleanup
+        @temp_files ||= []
+
+        # Create a temporary file with the proper extension
+        ext = File.extname(attachment.filename)
+        temp_file = Tempfile.new(['attachment', ext])
+        temp_file.binmode
+        temp_file.write(attachment.content)
+        temp_file.flush
+        temp_file.close
+
+        @temp_files << temp_file
+        temp_file.path
+      end
+
+      # Clean up temporary files created for attachments
+      def cleanup_temp_files
+        return unless @temp_files
+
+        @temp_files.each do |temp_file|
+          temp_file.unlink rescue nil
+        end
+        @temp_files = []
       end
 
       def parse_cli_response(output)
