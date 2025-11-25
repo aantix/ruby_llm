@@ -54,8 +54,6 @@ module RubyLLM
       private
 
       def sync_with_cli(messages, tools:, temperature:, model:)
-        puts "**** messages = #{messages.inspect}"
-
         prompt = build_prompt(messages, tools:, temperature:, model:)
         output, status = execute_claude_cli(prompt, stream: false)
 
@@ -96,19 +94,29 @@ module RubyLLM
         prompt_parts.join("\n\n")
       end
 
-      # Extract text content and collect attachments from a message
+      # Extract text content and include inline @ references for attachments
       def extract_content_and_attachments(msg)
         content = msg.content
 
         # Handle Content objects with attachments
         if content.is_a?(RubyLLM::Content)
-          # Collect attachments for CLI --attachment flags
-          content.attachments.each do |attachment|
+          # Build inline @ references for attachments
+          attachment_refs = content.attachments.map do |attachment|
+            # Still collect for temp file tracking
             @message_attachments << attachment
-          end
 
-          # Return just the text portion
-          content.text || ''
+            # Get the path and return @ reference
+            attachment_path = get_attachment_path(attachment)
+            attachment_path ? "@#{attachment_path}" : nil
+          end.compact
+
+          # Combine text with @ references
+          text_part = content.text || ''
+          if attachment_refs.any?
+            "#{text_part} #{attachment_refs.join(' ')}"
+          else
+            text_part
+          end
         else
           # Plain string content
           content.to_s
@@ -121,7 +129,12 @@ module RubyLLM
 
         # Execute from working directory if configured
         options = {}
-        options[:chdir] = @config.working_directory if @config.working_directory
+        if @config.working_directory
+          options[:chdir] = @config.working_directory
+          Rails.logger.info("ClaudeCode: Executing in working directory: #{@config.working_directory}")
+        else
+          Rails.logger.warn("ClaudeCode: No working_directory configured, executing in current directory")
+        end
 
         stdout, stderr, status = Open3.capture3(cmd, options)
 
@@ -138,7 +151,12 @@ module RubyLLM
 
         # Execute from working directory if configured
         options = {}
-        options[:chdir] = @config.working_directory if @config.working_directory
+        if @config.working_directory
+          options[:chdir] = @config.working_directory
+          Rails.logger.info("ClaudeCode (streaming): Executing in working directory: #{@config.working_directory}")
+        else
+          Rails.logger.warn("ClaudeCode (streaming): No working_directory configured, executing in current directory")
+        end
 
         Open3.popen2e(cmd, options) do |_stdin, stdout_stderr, wait_thr|
           stdout_stderr.each_line do |line|
@@ -167,25 +185,11 @@ module RubyLLM
         # Build base command
         cmd_parts = [cli_path]
 
-        # Add attachment flags if we have any
-        if @message_attachments && @message_attachments.any?
-          @message_attachments.each do |attachment|
-            attachment_path = get_attachment_path(attachment)
-            if attachment_path
-              # Escape the path for shell
-              escaped_path = attachment_path.to_s.gsub("'", "'\\\\''")
-              cmd_parts << "--attachment '#{escaped_path}'"
-            end
-          end
-        end
-
         # Add output format for streaming
         cmd_parts << "--output-format stream-json" if stream
 
-        # Add the prompt last
+        # Add the prompt last (attachments are now referenced inline with @ syntax)
         cmd_parts << "'#{escaped_prompt}'"
-
-        puts "**** " + cmd_parts.join(" ")
         cmd_parts.join(' ')
       end
 
