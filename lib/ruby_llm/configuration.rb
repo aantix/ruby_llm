@@ -33,7 +33,7 @@ module RubyLLM
                   :gpustack_api_base,
                   :gpustack_api_key,
                   :mistral_api_key,
-                  :claude_code_cli_path,
+                  :cli_path,
                   :working_directory,
                   # Default models
                   :default_model,
@@ -83,11 +83,24 @@ module RubyLLM
       @log_stream_debug = ENV['RUBYLLM_STREAM_DEBUG'] == 'true'
       self.log_regexp_timeout = Regexp.respond_to?(:timeout) ? (Regexp.timeout || 1.0) : nil
 
-      @claude_code_cli_path = 'claude' # defaults to 'claude' in PATH
+      @cli_path = detect_claude_cli_path
     end
 
     def instance_variables
       super.reject { |ivar| ivar.to_s.match?(/_id|_key|_secret|_token$/) }
+    end
+
+    private
+
+    def detect_claude_cli_path
+      # Check common installation locations in order of preference
+      candidates = [
+        File.expand_path('~/.claude/local/claude'),
+        '/usr/local/bin/claude',
+        '/opt/homebrew/bin/claude'
+      ]
+
+      candidates.find { |path| File.executable?(path) } || 'claude'
     end
 
     def log_regexp_timeout=(value)

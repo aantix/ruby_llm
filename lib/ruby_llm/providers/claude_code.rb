@@ -180,7 +180,7 @@ module RubyLLM
         # Escape the prompt for shell - single quotes need to be handled specially
         # We end the string, add an escaped quote, and start a new string: 'text'\''more'
         escaped_prompt = prompt.gsub("'", "'\\\\''")
-        cli_path = @config.claude_code_cli_path || 'claude'
+        cli_path = @config.cli_path || 'claude'
 
         # Build base command
         cmd_parts = [cli_path]
