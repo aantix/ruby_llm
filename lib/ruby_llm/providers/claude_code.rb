@@ -127,6 +127,10 @@ module RubyLLM
         cmd = build_cli_command(prompt, stream:)
         Rails.logger.debug("Executing Claude CLI command: #{cmd}")
 
+        # Build environment variables from config credentials
+        env = build_env_vars
+        Rails.logger.debug("ClaudeCode: Environment vars: #{env.keys.join(', ')}") if env.any?
+
         # Execute from working directory if configured
         options = {}
         if @config.working_directory
@@ -136,7 +140,7 @@ module RubyLLM
           Rails.logger.warn("ClaudeCode: No working_directory configured, executing in current directory")
         end
 
-        stdout, stderr, status = Open3.capture3(cmd, options)
+        stdout, stderr, status = Open3.capture3(env, cmd, options)
 
         Rails.logger.debug("Claude CLI stdout: #{stdout}")
         Rails.logger.debug("Claude CLI stderr: #{stderr}")
@@ -149,6 +153,9 @@ module RubyLLM
       def execute_claude_cli_streaming(prompt, &block)
         cmd = build_cli_command(prompt, stream: true)
 
+        # Build environment variables from config credentials
+        env = build_env_vars
+
         # Execute from working directory if configured
         options = {}
         if @config.working_directory
@@ -158,7 +165,7 @@ module RubyLLM
           Rails.logger.warn("ClaudeCode (streaming): No working_directory configured, executing in current directory")
         end
 
-        Open3.popen2e(cmd, options) do |_stdin, stdout_stderr, wait_thr|
+        Open3.popen2e(env, cmd, options) do |_stdin, stdout_stderr, wait_thr|
           stdout_stderr.each_line do |line|
             next if line.strip.empty?
 
@@ -191,6 +198,36 @@ module RubyLLM
         # Add the prompt last (attachments are now referenced inline with @ syntax)
         cmd_parts << "'#{escaped_prompt}'"
         cmd_parts.join(' ')
+      end
+
+      # Build environment variables hash from config credentials
+      # Claude Code CLI reads credentials from environment variables
+      def build_env_vars
+        env = {}
+
+        # Anthropic API key
+        if @config.respond_to?(:anthropic_api_key) && @config.anthropic_api_key.present?
+          env['ANTHROPIC_API_KEY'] = @config.anthropic_api_key
+        end
+
+        # AWS Bedrock credentials
+        if @config.respond_to?(:bedrock_api_key) && @config.bedrock_api_key.present?
+          env['AWS_ACCESS_KEY_ID'] = @config.bedrock_api_key
+        end
+
+        if @config.respond_to?(:bedrock_secret_key) && @config.bedrock_secret_key.present?
+          env['AWS_SECRET_ACCESS_KEY'] = @config.bedrock_secret_key
+        end
+
+        if @config.respond_to?(:bedrock_region) && @config.bedrock_region.present?
+          env['AWS_REGION'] = @config.bedrock_region
+        end
+
+        if @config.respond_to?(:bedrock_session_token) && @config.bedrock_session_token.present?
+          env['AWS_SESSION_TOKEN'] = @config.bedrock_session_token
+        end
+
+        env
       end
 
       # Get the file path for an attachment
