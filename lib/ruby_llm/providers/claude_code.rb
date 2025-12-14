@@ -206,28 +206,37 @@ module RubyLLM
         env = {}
 
         # Anthropic API key
-        if @config.respond_to?(:anthropic_api_key) && @config.anthropic_api_key.present?
+        if config_value_present?(:anthropic_api_key)
           env['ANTHROPIC_API_KEY'] = @config.anthropic_api_key
         end
 
         # AWS Bedrock credentials
-        if @config.respond_to?(:bedrock_api_key) && @config.bedrock_api_key.present?
+        if config_value_present?(:bedrock_api_key)
           env['AWS_ACCESS_KEY_ID'] = @config.bedrock_api_key
         end
 
-        if @config.respond_to?(:bedrock_secret_key) && @config.bedrock_secret_key.present?
+        if config_value_present?(:bedrock_secret_key)
           env['AWS_SECRET_ACCESS_KEY'] = @config.bedrock_secret_key
         end
 
-        if @config.respond_to?(:bedrock_region) && @config.bedrock_region.present?
+        if config_value_present?(:bedrock_region)
           env['AWS_REGION'] = @config.bedrock_region
         end
 
-        if @config.respond_to?(:bedrock_session_token) && @config.bedrock_session_token.present?
+        if config_value_present?(:bedrock_session_token)
           env['AWS_SESSION_TOKEN'] = @config.bedrock_session_token
         end
 
         env
+      end
+
+      # Check if a config value is present (not nil and not empty)
+      # Uses standard Ruby to avoid ActiveSupport dependency
+      def config_value_present?(attr)
+        return false unless @config.respond_to?(attr)
+
+        value = @config.send(attr)
+        !value.nil? && !value.to_s.strip.empty?
       end
 
       # Get the file path for an attachment
