@@ -189,10 +189,10 @@ module RubyLLM
         escaped_prompt = prompt.gsub("'", "'\\\\''")
         cli_path = @config.cli_path || 'claude'
 
-        # Build base command
-        cmd_parts = [cli_path]
+        # Build base command - must use -p (print mode) for non-interactive execution
+        cmd_parts = [cli_path, '-p']
 
-        # Add output format for streaming
+        # Add output format for streaming (requires -p)
         cmd_parts << "--output-format stream-json" if stream
 
         # Add the prompt last (attachments are now referenced inline with @ syntax)
